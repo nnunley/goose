@@ -387,7 +387,7 @@ impl Provider for GithubCopilotProvider {
             GITHUB_COPILOT_DEFAULT_MODEL,
             GITHUB_COPILOT_KNOWN_MODELS.to_vec(),
             GITHUB_COPILOT_DOC_URL,
-            vec![ConfigKey::new_oauth(
+            vec![ConfigKey::new(
                 "GITHUB_COPILOT_TOKEN",
                 true,
                 true,
@@ -432,7 +432,7 @@ impl Provider for GithubCopilotProvider {
     }
 
     /// Fetch supported models from GitHub Copliot; returns Err on failure, Ok(None) if not present
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         let (endpoint, token) = self.get_api_info().await?;
         let url = format!("{}/models", endpoint);
 
@@ -471,7 +471,9 @@ impl Provider for GithubCopilotProvider {
         models.sort();
         Ok(Some(models))
     }
+}
 
+impl GithubCopilotProvider {
     async fn configure_oauth(&self) -> Result<(), ProviderError> {
         let config = Config::global();
 
@@ -501,3 +503,4 @@ impl Provider for GithubCopilotProvider {
         Ok(())
     }
 }
+

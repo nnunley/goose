@@ -8,11 +8,12 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
+use super::embedding::{EmbeddingCapabilities, EmbeddingService, EmbeddingResult};
 use super::errors::ProviderError;
 use super::utils::emit_debug_trace;
 use crate::config::Config;
-use crate::conversation::message::{Message, MessageContent};
 use crate::impl_provider_default;
+use crate::conversation::message::{Message, MessageContent};
 use crate::model::ModelConfig;
 use rmcp::model::Tool;
 
@@ -559,5 +560,23 @@ mod tests {
         let config = provider.get_model_config();
 
         assert_eq!(config.model_name, "sonnet");
+    }
+}
+
+// ClaudeCodeProvider doesn't support embeddings
+#[async_trait::async_trait]
+impl EmbeddingService for ClaudeCodeProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        Err(ProviderError::NotImplemented(
+            "ClaudeCodeProvider does not support embeddings".to_string()
+        ))
     }
 }

@@ -162,3 +162,4 @@ impl Provider for AzureProvider {
         Ok((message, ProviderUsage::new(model, usage)))
     }
 }
+

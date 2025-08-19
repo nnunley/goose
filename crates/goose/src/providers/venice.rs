@@ -118,15 +118,15 @@ impl VeniceProvider {
         let status = response.status();
         tracing::debug!("Venice response status: {}", status);
 
-        if !status.is_success() {
-            // Read response body for more details on error
-            let error_body = response.text().await.unwrap_or_default();
+        // Read response body once
+        let response_text: String = response.text().await?;
 
+        if !status.is_success() {
             // Log full error response for debugging
-            tracing::debug!("Full Venice error response: {}", error_body);
+            tracing::debug!("Full Venice error response: {}", response_text);
 
             // Try to parse the error response
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&error_body) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&response_text) {
                 // Print the full JSON error for better debugging
                 println!(
                     "Venice API error response: {}",
@@ -169,11 +169,10 @@ impl VeniceProvider {
             }
 
             // Use the common error mapping function
-            let error_json = serde_json::from_str::<Value>(&error_body).ok();
+            let error_json = serde_json::from_str::<Value>(&response_text).ok();
             return Err(map_http_error_to_provider_error(status, error_json));
         }
 
-        let response_text = response.text().await?;
         serde_json::from_str(&response_text).map_err(|e| {
             ProviderError::RequestFailed(format!(
                 "Failed to parse JSON: {}\nResponse: {}",
@@ -216,7 +215,7 @@ impl Provider for VeniceProvider {
         self.model.clone()
     }
 
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         let response = self.api_client.response_get(&self.models_path).await?;
         let json: serde_json::Value = response.json().await?;
 
@@ -524,3 +523,4 @@ mod tests {
         assert_eq!(metadata.config_keys[3].name, "VENICE_MODELS_PATH");
     }
 }
+

@@ -21,6 +21,12 @@ pub mod todo_tools;
 mod tool_execution;
 mod tool_route_manager;
 mod tool_router_index_manager;
+// Feature-gated vector database implementations  
+#[cfg(feature = "vectordb-sqlite")]
+pub(crate) mod sqlite_vectordb;  // SQLite + HNSW vector database implementation
+
+// Unified vector database interface
+pub(crate) mod tool_vectordb;         // Vector database adapter trait and factory
 pub mod types;
 
 pub use agent::{Agent, AgentEvent};

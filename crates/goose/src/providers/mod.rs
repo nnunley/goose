@@ -1,5 +1,5 @@
 pub mod anthropic;
-mod api_client;
+pub mod api_client;
 pub mod azure;
 pub mod azureauth;
 pub mod base;
@@ -25,7 +25,7 @@ pub mod openai;
 pub mod openrouter;
 pub mod pricing;
 pub mod provider_registry;
-mod retry;
+pub mod retry;
 pub mod sagemaker_tgi;
 pub mod snowflake;
 pub mod testprovider;
@@ -36,5 +36,8 @@ pub mod utils;
 pub mod utils_universal_openai_stream;
 pub mod venice;
 pub mod xai;
+
+#[cfg(test)]
+mod embedding_tests;
 
 pub use factory::{create, providers, refresh_custom_providers};

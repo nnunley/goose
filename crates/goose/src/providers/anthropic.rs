@@ -211,7 +211,7 @@ impl Provider for AnthropicProvider {
         Ok((message, provider_usage))
     }
 
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         let response = self.api_client.api_get("v1/models").await?;
 
         if response.status != StatusCode::OK {
@@ -290,3 +290,4 @@ impl Provider for AnthropicProvider {
         self.supports_streaming
     }
 }
+

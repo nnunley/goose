@@ -243,6 +243,7 @@ mod tests {
             ))
         }
     }
+    
 
     fn create_test_message(text: &str) -> Message {
         Message::new(

@@ -191,3 +191,4 @@ impl Provider for BedrockProvider {
         Ok((message, provider_usage))
     }
 }
+

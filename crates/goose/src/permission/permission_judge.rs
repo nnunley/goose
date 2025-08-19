@@ -316,6 +316,7 @@ mod tests {
             ))
         }
     }
+    
 
     fn create_mock_provider() -> Arc<dyn Provider> {
         let config = ModelConfig::new_or_fail("test-model");

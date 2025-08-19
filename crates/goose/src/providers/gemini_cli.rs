@@ -7,10 +7,11 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
 use super::base::{Provider, ProviderMetadata, ProviderUsage, Usage};
+use super::embedding::{EmbeddingCapabilities, EmbeddingService, EmbeddingResult};
 use super::errors::ProviderError;
 use super::utils::emit_debug_trace;
-use crate::conversation::message::{Message, MessageContent};
 use crate::impl_provider_default;
+use crate::conversation::message::{Message, MessageContent};
 use crate::model::ModelConfig;
 use rmcp::model::Role;
 use rmcp::model::Tool;
@@ -176,13 +177,9 @@ impl GeminiCliProvider {
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| {
-            ProviderError::RequestFailed(format!(
-                "Failed to spawn Gemini CLI command '{}': {}. \
-                Make sure the Gemini CLI is installed and in your PATH.",
-                self.command, e
-            ))
-        })?;
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| ProviderError::RequestFailed(format!("Failed to spawn command: {}", e)))?;
 
         let stdout = child
             .stdout
@@ -391,5 +388,23 @@ mod tests {
         let config = provider.get_model_config();
 
         assert_eq!(config.model_name, GEMINI_CLI_DEFAULT_MODEL);
+    }
+}
+
+// GeminiCliProvider doesn't support embeddings
+#[async_trait::async_trait]
+impl EmbeddingService for GeminiCliProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        Err(ProviderError::NotImplemented(
+            "GeminiCliProvider does not support embeddings".to_string()
+        ))
     }
 }

@@ -6,6 +6,7 @@ use tokio::sync::Mutex;
 
 use super::base::{LeadWorkerProviderTrait, Provider, ProviderMetadata, ProviderUsage};
 use super::errors::ProviderError;
+use super::embedding::{EmbeddingService, EmbeddingCapabilities, EmbeddingResult};
 use crate::conversation::message::{Message, MessageContent};
 use crate::model::ModelConfig;
 use rmcp::model::Tool;
@@ -409,10 +410,10 @@ impl Provider for LeadWorkerProvider {
         final_result
     }
 
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         // Combine models from both providers
-        let lead_models = self.lead_provider.fetch_supported_models().await?;
-        let worker_models = self.worker_provider.fetch_supported_models().await?;
+        let lead_models = self.lead_provider.fetch_supported_models_async().await?;
+        let worker_models = self.worker_provider.fetch_supported_models_async().await?;
 
         match (lead_models, worker_models) {
             (Some(lead), Some(worker)) => {
@@ -427,27 +428,38 @@ impl Provider for LeadWorkerProvider {
         }
     }
 
-    fn supports_embeddings(&self) -> bool {
-        // Support embeddings if either provider supports them
-        self.lead_provider.supports_embeddings() || self.worker_provider.supports_embeddings()
-    }
-
-    async fn create_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, ProviderError> {
-        // Use the lead provider for embeddings if it supports them, otherwise use worker
-        if self.lead_provider.supports_embeddings() {
-            self.lead_provider.create_embeddings(texts).await
-        } else if self.worker_provider.supports_embeddings() {
-            self.worker_provider.create_embeddings(texts).await
-        } else {
-            Err(ProviderError::ExecutionError(
-                "Neither lead nor worker provider supports embeddings".to_string(),
-            ))
-        }
-    }
-
     /// Check if this provider is a LeadWorkerProvider
     fn as_lead_worker(&self) -> Option<&dyn LeadWorkerProviderTrait> {
         Some(self)
+    }
+}
+
+#[async_trait]
+impl EmbeddingService for LeadWorkerProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        // Since we can't directly access EmbeddingService methods on Arc<dyn Provider>,
+        // we need to rely on the fact that providers that support embeddings will
+        // have the supports_embeddings() method return true
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        // LeadWorkerProvider doesn't support the new embedding API yet
+        Err(ProviderError::ExecutionError(
+            "LeadWorkerProvider does not support model-specific embeddings".to_string(),
+        ))
+    }
+    
+    async fn create_embeddings(&self, _texts: Vec<String>) -> Result<EmbeddingResult, ProviderError> {
+        // LeadWorkerProvider doesn't support embeddings directly
+        // Users should specify GOOSE_EMBEDDING_MODEL_PROVIDER to use a specific provider for embeddings
+        Err(ProviderError::ExecutionError(
+            "LeadWorkerProvider does not support embeddings directly. Please set GOOSE_EMBEDDING_MODEL_PROVIDER to specify a provider for embeddings.".to_string(),
+        ))
     }
 }
 

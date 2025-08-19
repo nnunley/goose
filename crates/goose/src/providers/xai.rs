@@ -1,27 +1,29 @@
-use super::api_client::{ApiClient, AuthMethod};
 use super::errors::ProviderError;
-use super::retry::ProviderRetry;
-use super::utils::{get_model, handle_response_openai_compat};
-use crate::conversation::message::Message;
 use crate::impl_provider_default;
+use crate::conversation::message::Message;
 use crate::model::ModelConfig;
 use crate::providers::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
+use crate::providers::embedding::{EmbeddingCapabilities, EmbeddingService, EmbeddingResult};
 use crate::providers::formats::openai::{create_request, get_usage, response_to_message};
+use crate::providers::utils::get_model;
 use anyhow::Result;
 use async_trait::async_trait;
+use reqwest::{Client, StatusCode};
 use rmcp::model::Tool;
 use serde_json::Value;
+use std::time::Duration;
+use url::Url;
 
 pub const XAI_API_HOST: &str = "https://api.x.ai/v1";
 pub const XAI_DEFAULT_MODEL: &str = "grok-3";
 pub const XAI_KNOWN_MODELS: &[&str] = &[
-    "grok-4-0709",
     "grok-3",
     "grok-3-fast",
     "grok-3-mini",
     "grok-3-mini-fast",
     "grok-2-vision-1212",
     "grok-2-image-1212",
+    "grok-2-1212",
     "grok-3-latest",
     "grok-3-fast-latest",
     "grok-3-mini-latest",
@@ -39,7 +41,9 @@ pub const XAI_DOC_URL: &str = "https://docs.x.ai/docs/overview";
 #[derive(serde::Serialize)]
 pub struct XaiProvider {
     #[serde(skip)]
-    api_client: ApiClient,
+    client: Client,
+    host: String,
+    api_key: String,
     model: ModelConfig,
 }
 
@@ -53,21 +57,67 @@ impl XaiProvider {
             .get_param("XAI_HOST")
             .unwrap_or_else(|_| XAI_API_HOST.to_string());
 
-        let auth = AuthMethod::BearerToken(api_key);
-        let api_client = ApiClient::new(host, auth)?;
+        let client = Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()?;
 
-        Ok(Self { api_client, model })
+        Ok(Self {
+            client,
+            host,
+            api_key,
+            model,
+        })
     }
 
-    async fn post(&self, payload: Value) -> Result<Value, ProviderError> {
+    async fn post(&self, payload: &Value) -> anyhow::Result<Value, ProviderError> {
+        // Ensure the host ends with a slash for proper URL joining
+        let host = if self.host.ends_with('/') {
+            self.host.clone()
+        } else {
+            format!("{}/", self.host)
+        };
+        let base_url = Url::parse(&host)
+            .map_err(|e| ProviderError::RequestFailed(format!("Invalid base URL: {e}")))?;
+        let url = base_url.join("chat/completions").map_err(|e| {
+            ProviderError::RequestFailed(format!("Failed to construct endpoint URL: {e}"))
+        })?;
+
+        tracing::debug!("xAI API URL: {}", url);
         tracing::debug!("xAI request model: {:?}", self.model.model_name);
 
         let response = self
-            .api_client
-            .response_post("chat/completions", &payload)
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&payload)
+            .send()
             .await?;
 
-        handle_response_openai_compat(response).await
+        let status = response.status();
+        let payload: Option<Value> = response.json().await.ok();
+
+        match status {
+            StatusCode::OK => payload.ok_or_else( || ProviderError::RequestFailed("Response body is not valid JSON".to_string()) ),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                Err(ProviderError::Authentication(format!("Authentication failed. Please ensure your API keys are valid and have the required permissions. \
+                    Status: {}. Response: {:?}", status, payload)))
+            }
+            StatusCode::PAYLOAD_TOO_LARGE => {
+                Err(ProviderError::ContextLengthExceeded(format!("{:?}", payload)))
+            }
+            StatusCode::TOO_MANY_REQUESTS => {
+                Err(ProviderError::RateLimitExceeded(format!("{:?}", payload)))
+            }
+            StatusCode::INTERNAL_SERVER_ERROR | StatusCode::SERVICE_UNAVAILABLE => {
+                Err(ProviderError::ServerError(format!("{:?}", payload)))
+            }
+            _ => {
+                tracing::debug!(
+                    "{}", format!("Provider request failed with status: {}. Payload: {:?}", status, payload)
+                );
+                Err(ProviderError::RequestFailed(format!("Request failed with status: {}", status)))
+            }
+        }
     }
 }
 
@@ -101,7 +151,7 @@ impl Provider for XaiProvider {
         system: &str,
         messages: &[Message],
         tools: &[Tool],
-    ) -> Result<(Message, ProviderUsage), ProviderError> {
+    ) -> anyhow::Result<(Message, ProviderUsage), ProviderError> {
         let payload = create_request(
             &self.model,
             system,
@@ -110,7 +160,7 @@ impl Provider for XaiProvider {
             &super::utils::ImageFormat::OpenAi,
         )?;
 
-        let response = self.with_retry(|| self.post(payload.clone())).await?;
+        let response = self.post(&payload).await?;
 
         let message = response_to_message(&response)?;
         let usage = response.get("usage").map(get_usage).unwrap_or_else(|| {
@@ -120,5 +170,23 @@ impl Provider for XaiProvider {
         let model = get_model(&response);
         super::utils::emit_debug_trace(&self.model, &payload, &response, &usage);
         Ok((message, ProviderUsage::new(model, usage)))
+    }
+}
+
+// XaiProvider doesn't support embeddings
+#[async_trait::async_trait]
+impl EmbeddingService for XaiProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        Err(ProviderError::NotImplemented(
+            "XaiProvider does not support embeddings".to_string()
+        ))
     }
 }

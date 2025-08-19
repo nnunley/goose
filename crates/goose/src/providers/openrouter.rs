@@ -1,20 +1,21 @@
 use anyhow::{Error, Result};
 use async_trait::async_trait;
+use reqwest::Client;
 use serde_json::{json, Value};
+use std::time::Duration;
 
-use super::api_client::{ApiClient, AuthMethod};
 use super::base::{ConfigKey, Provider, ProviderMetadata, ProviderUsage, Usage};
 use super::errors::ProviderError;
-use super::retry::ProviderRetry;
 use super::utils::{
     emit_debug_trace, get_model, handle_response_google_compat, handle_response_openai_compat,
     is_google_model,
 };
-use crate::conversation::message::Message;
 use crate::impl_provider_default;
+use crate::conversation::message::Message;
 use crate::model::ModelConfig;
 use crate::providers::formats::openai::{create_request, get_usage, response_to_message};
 use rmcp::model::Tool;
+use url::Url;
 
 pub const OPENROUTER_DEFAULT_MODEL: &str = "anthropic/claude-3.5-sonnet";
 pub const OPENROUTER_MODEL_PREFIX_ANTHROPIC: &str = "anthropic";
@@ -34,7 +35,9 @@ pub const OPENROUTER_DOC_URL: &str = "https://openrouter.ai/models";
 #[derive(serde::Serialize)]
 pub struct OpenRouterProvider {
     #[serde(skip)]
-    api_client: ApiClient,
+    client: Client,
+    host: String,
+    api_key: String,
     model: ModelConfig,
 }
 
@@ -48,18 +51,34 @@ impl OpenRouterProvider {
             .get_param("OPENROUTER_HOST")
             .unwrap_or_else(|_| "https://openrouter.ai".to_string());
 
-        let auth = AuthMethod::BearerToken(api_key);
-        let api_client = ApiClient::new(host, auth)?
-            .with_header("HTTP-Referer", "https://block.github.io/goose")?
-            .with_header("X-Title", "Goose")?;
+        let client = Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()?;
 
-        Ok(Self { api_client, model })
+        Ok(Self {
+            client,
+            host,
+            api_key,
+            model,
+        })
     }
 
     async fn post(&self, payload: &Value) -> Result<Value, ProviderError> {
+        let base_url = Url::parse(&self.host)
+            .map_err(|e| ProviderError::RequestFailed(format!("Invalid base URL: {e}")))?;
+        let url = base_url.join("api/v1/chat/completions").map_err(|e| {
+            ProviderError::RequestFailed(format!("Failed to construct endpoint URL: {e}"))
+        })?;
+
         let response = self
-            .api_client
-            .response_post("api/v1/chat/completions", payload)
+            .client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("HTTP-Referer", "https://block.github.io/goose")
+            .header("X-Title", "Goose")
+            .json(payload)
+            .send()
             .await?;
 
         // Handle Google-compatible model responses differently
@@ -202,12 +221,6 @@ fn create_request_based_on_model(
         payload = update_request_for_anthropic(&payload);
     }
 
-    // Always add transforms: ["middle-out"] for OpenRouter to handle prompts > context size
-    payload
-        .as_object_mut()
-        .unwrap()
-        .insert("transforms".to_string(), json!(["middle-out"]));
-
     Ok(payload)
 }
 
@@ -251,12 +264,7 @@ impl Provider for OpenRouterProvider {
         let payload = create_request_based_on_model(self, system, messages, tools)?;
 
         // Make request
-        let response = self
-            .with_retry(|| async {
-                let payload_clone = payload.clone();
-                self.post(&payload_clone).await
-            })
-            .await?;
+        let response = self.post(&payload).await?;
 
         // Parse response
         let message = response_to_message(&response)?;
@@ -270,10 +278,24 @@ impl Provider for OpenRouterProvider {
     }
 
     /// Fetch supported models from OpenRouter API (only models with tool support)
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
+        let base_url = Url::parse(&self.host)
+            .map_err(|e| ProviderError::RequestFailed(format!("Invalid base URL: {e}")))?;
+        let url = base_url.join("api/v1/models").map_err(|e| {
+            ProviderError::RequestFailed(format!("Failed to construct models URL: {e}"))
+        })?;
+
         // Handle request failures gracefully
         // If the request fails, fall back to manual entry
-        let response = match self.api_client.response_get("api/v1/models").await {
+        let response = match self
+            .client
+            .get(url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("HTTP-Referer", "https://block.github.io/goose")
+            .header("X-Title", "Goose")
+            .send()
+            .await
+        {
             Ok(response) => response,
             Err(e) => {
                 tracing::warn!("Failed to fetch models from OpenRouter API: {}, falling back to manual model entry", e);
@@ -352,3 +374,6 @@ impl Provider for OpenRouterProvider {
             .starts_with(OPENROUTER_MODEL_PREFIX_ANTHROPIC)
     }
 }
+
+
+

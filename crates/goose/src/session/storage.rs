@@ -1293,7 +1293,7 @@ pub async fn generate_description_with_schedule_id(
 
     // Use the provider's session naming capability
     let sanitized_description = provider
-        .generate_session_name(messages)
+        .generate_session_name(messages.messages())
         .await
         .map_err(|e| {
             tracing::error!("Failed to generate session description: {}", e);

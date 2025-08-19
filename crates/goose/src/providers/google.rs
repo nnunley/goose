@@ -133,7 +133,7 @@ impl Provider for GoogleProvider {
     }
 
     /// Fetch supported models from Google Generative Language API; returns Err on failure, Ok(None) if not present
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         let response = self.api_client.response_get("v1beta/models").await?;
         let json: serde_json::Value = response.json().await?;
         let arr = match json.get("models").and_then(|v| v.as_array()) {
@@ -149,3 +149,4 @@ impl Provider for GoogleProvider {
         Ok(Some(models))
     }
 }
+

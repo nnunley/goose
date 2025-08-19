@@ -326,3 +326,4 @@ impl Provider for SnowflakeProvider {
         Ok((message, ProviderUsage::new(model, usage)))
     }
 }
+

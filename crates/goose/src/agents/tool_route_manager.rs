@@ -1,5 +1,5 @@
 use crate::agents::extension_manager::ExtensionManager;
-use crate::agents::router_tool_selector::{create_tool_selector, RouterToolSelector};
+use crate::agents::router_tool_selector::{create_tool_selector, RouterToolSelector, RouterToolSelectionStrategy};
 use crate::agents::router_tools::{self};
 use crate::agents::tool_execution::ToolCallResult;
 use crate::agents::tool_router_index_manager::ToolRouterIndexManager;
@@ -92,7 +92,7 @@ impl ToolRouteManager {
             return Ok(());
         }
 
-        let selector = create_tool_selector(provider.clone())
+        let selector = create_tool_selector(provider.clone(), Some(RouterToolSelectionStrategy::Llm), None)
             .await
             .map_err(|e| anyhow!("Failed to create tool selector: {}", e))?;
 

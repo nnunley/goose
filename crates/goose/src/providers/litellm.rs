@@ -1,16 +1,17 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use reqwest::Client;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::time::Duration;
+use url::Url;
 
-use super::api_client::{ApiClient, AuthMethod};
 use super::base::{ConfigKey, ModelInfo, Provider, ProviderMetadata, ProviderUsage};
-use super::embedding::EmbeddingCapable;
+use super::embedding::{EmbeddingCapable, EmbeddingCapabilities, EmbeddingService, EmbeddingResult};
 use super::errors::ProviderError;
-use super::retry::ProviderRetry;
 use super::utils::{emit_debug_trace, get_model, handle_response_openai_compat, ImageFormat};
-use crate::conversation::message::Message;
 use crate::impl_provider_default;
+use crate::conversation::message::Message;
 use crate::model::ModelConfig;
 use rmcp::model::Tool;
 
@@ -20,9 +21,12 @@ pub const LITELLM_DOC_URL: &str = "https://docs.litellm.ai/docs/";
 #[derive(Debug, serde::Serialize)]
 pub struct LiteLLMProvider {
     #[serde(skip)]
-    api_client: ApiClient,
+    client: Client,
+    host: String,
     base_path: String,
+    api_key: String,
     model: ModelConfig,
+    custom_headers: Option<HashMap<String, String>>,
 }
 
 impl_provider_default!(LiteLLMProvider);
@@ -45,35 +49,44 @@ impl LiteLLMProvider {
             .ok()
             .map(parse_custom_headers);
         let timeout_secs: u64 = config.get_param("LITELLM_TIMEOUT").unwrap_or(600);
-
-        let auth = if api_key.is_empty() {
-            AuthMethod::Custom(Box::new(NoAuth))
-        } else {
-            AuthMethod::BearerToken(api_key)
-        };
-
-        let mut api_client =
-            ApiClient::with_timeout(host, auth, std::time::Duration::from_secs(timeout_secs))?;
-
-        if let Some(headers) = custom_headers {
-            let mut header_map = reqwest::header::HeaderMap::new();
-            for (key, value) in headers {
-                let header_name = reqwest::header::HeaderName::from_bytes(key.as_bytes())?;
-                let header_value = reqwest::header::HeaderValue::from_str(&value)?;
-                header_map.insert(header_name, header_value);
-            }
-            api_client = api_client.with_headers(header_map)?;
-        }
+        let client = Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .build()?;
 
         Ok(Self {
-            api_client,
+            client,
+            host,
             base_path,
+            api_key,
             model,
+            custom_headers,
         })
     }
 
+    fn add_headers(&self, mut request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        if let Some(custom_headers) = &self.custom_headers {
+            for (key, value) in custom_headers {
+                request = request.header(key, value);
+            }
+        }
+
+        request
+    }
+
     async fn fetch_models(&self) -> Result<Vec<ModelInfo>, ProviderError> {
-        let response = self.api_client.response_get("model/info").await?;
+        let models_url = format!("{}/model/info", self.host);
+
+        let mut req = self
+            .client
+            .get(&models_url)
+            .header("Authorization", format!("Bearer {}", self.api_key));
+
+        req = self.add_headers(req);
+
+        let response = req
+            .send()
+            .await
+            .map_err(|e| ProviderError::RequestFailed(format!("Failed to fetch models: {}", e)))?;
 
         if !response.status().is_success() {
             return Err(ProviderError::RequestFailed(format!(
@@ -112,22 +125,22 @@ impl LiteLLMProvider {
     }
 
     async fn post(&self, payload: &Value) -> Result<Value, ProviderError> {
-        let response = self
-            .api_client
-            .response_post(&self.base_path, payload)
-            .await?;
+        let base_url = Url::parse(&self.host)
+            .map_err(|e| ProviderError::RequestFailed(format!("Invalid base URL: {e}")))?;
+        let url = base_url.join(&self.base_path).map_err(|e| {
+            ProviderError::RequestFailed(format!("Failed to construct endpoint URL: {e}"))
+        })?;
+
+        let request = self
+            .client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.api_key));
+
+        let request = self.add_headers(request);
+
+        let response = request.json(payload).send().await?;
+
         handle_response_openai_compat(response).await
-    }
-}
-
-// No authentication provider for LiteLLM when API key is not provided
-struct NoAuth;
-
-#[async_trait]
-impl super::api_client::AuthProvider for NoAuth {
-    async fn get_auth_header(&self) -> Result<(String, String)> {
-        // Return a dummy header that won't be used
-        Ok(("X-No-Auth".to_string(), "true".to_string()))
     }
 }
 
@@ -179,12 +192,7 @@ impl Provider for LiteLLMProvider {
             payload = update_request_for_cache_control(&payload);
         }
 
-        let response = self
-            .with_retry(|| async {
-                let payload_clone = payload.clone();
-                self.post(&payload_clone).await
-            })
-            .await?;
+        let response = self.post(&payload).await?;
 
         let message = super::formats::openai::response_to_message(&response)?;
         let usage = super::formats::openai::get_usage(&response);
@@ -193,9 +201,6 @@ impl Provider for LiteLLMProvider {
         Ok((message, ProviderUsage::new(model, usage)))
     }
 
-    fn supports_embeddings(&self) -> bool {
-        true
-    }
 
     fn supports_cache_control(&self) -> bool {
         if let Ok(models) = tokio::task::block_in_place(|| {
@@ -209,7 +214,7 @@ impl Provider for LiteLLMProvider {
         self.model.model_name.to_lowercase().contains("claude")
     }
 
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         match self.fetch_models().await {
             Ok(models) => {
                 let model_names: Vec<String> = models.into_iter().map(|m| m.name).collect();
@@ -226,6 +231,8 @@ impl Provider for LiteLLMProvider {
 #[async_trait]
 impl EmbeddingCapable for LiteLLMProvider {
     async fn create_embeddings(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>, anyhow::Error> {
+        let endpoint = format!("{}/v1/embeddings", self.host);
+
         let embedding_model = std::env::var("GOOSE_EMBEDDING_MODEL")
             .unwrap_or_else(|_| "text-embedding-3-small".to_string());
 
@@ -235,10 +242,16 @@ impl EmbeddingCapable for LiteLLMProvider {
             "encoding_format": "float"
         });
 
-        let response = self
-            .api_client
-            .response_post("v1/embeddings", &payload)
-            .await?;
+        let mut req = self
+            .client
+            .post(&endpoint)
+            .header("Content-Type", "application/json")
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .json(&payload);
+
+        req = self.add_headers(req);
+
+        let response = req.send().await?;
         let response_text = response.text().await?;
         let response_json: Value = serde_json::from_str(&response_text)?;
 
@@ -334,4 +347,22 @@ fn parse_custom_headers(headers_str: String) -> HashMap<String, String> {
         }
     }
     headers
+}
+
+// LiteLLMProvider doesn't support embeddings by default
+#[async_trait::async_trait]
+impl EmbeddingService for LiteLLMProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        Err(ProviderError::NotImplemented(
+            "LiteLLMProvider does not support embeddings".to_string()
+        ))
+    }
 }

@@ -3,9 +3,7 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 
 use super::errors::ProviderError;
-use super::retry::RetryConfig;
 use crate::conversation::message::Message;
-use crate::conversation::Conversation;
 use crate::model::ModelConfig;
 use crate::utils::safe_truncate;
 use rmcp::model::Tool;
@@ -164,45 +162,24 @@ impl ProviderMetadata {
     }
 }
 
-/// Configuration key metadata for provider setup
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ConfigKey {
-    /// The name of the configuration key (e.g., "API_KEY")
     pub name: String,
-    /// Whether this key is required for the provider to function
     pub required: bool,
-    /// Whether this key should be stored securely (e.g., in keychain)
     pub secret: bool,
-    /// Optional default value for the key
     pub default: Option<String>,
-    /// Whether this key should be configured using OAuth device code flow
-    /// When true, the provider's configure_oauth() method will be called instead of prompting for manual input
+    #[serde(default)]
     pub oauth_flow: bool,
 }
 
 impl ConfigKey {
-    /// Create a new ConfigKey
     pub fn new(name: &str, required: bool, secret: bool, default: Option<&str>) -> Self {
         Self {
             name: name.to_string(),
             required,
             secret,
-            default: default.map(|s| s.to_string()),
             oauth_flow: false,
-        }
-    }
-
-    /// Create a new ConfigKey that uses OAuth device code flow for configuration
-    ///
-    /// This is used for providers that support OAuth authentication instead of manual API key entry.
-    /// When oauth_flow is true, the configuration system will call the provider's configure_oauth() method.
-    pub fn new_oauth(name: &str, required: bool, secret: bool, default: Option<&str>) -> Self {
-        Self {
-            name: name.to_string(),
-            required,
-            secret,
             default: default.map(|s| s.to_string()),
-            oauth_flow: true,
         }
     }
 }
@@ -299,6 +276,7 @@ impl Usage {
 }
 
 use async_trait::async_trait;
+use super::embedding::EmbeddingCapabilities;
 
 /// Trait for LeadWorkerProvider-specific functionality
 pub trait LeadWorkerProviderTrait {
@@ -340,18 +318,14 @@ pub trait Provider: Send + Sync {
     /// Get the model config from the provider
     fn get_model_config(&self) -> ModelConfig;
 
-    fn retry_config(&self) -> RetryConfig {
-        RetryConfig::default()
-    }
-
-    /// Optional hook to fetch supported models.
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    /// Optional hook to fetch supported models asynchronously.
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         Ok(None)
     }
 
-    /// Check if this provider supports embeddings
-    fn supports_embeddings(&self) -> bool {
-        false
+    /// Get embedding capabilities (delegate to EmbeddingService)
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None // Default implementation for providers without embeddings
     }
 
     /// Check if this provider supports cache control
@@ -359,12 +333,6 @@ pub trait Provider: Send + Sync {
         false
     }
 
-    /// Create embeddings if supported. Default implementation returns an error.
-    async fn create_embeddings(&self, _texts: Vec<String>) -> Result<Vec<Vec<f32>>, ProviderError> {
-        Err(ProviderError::ExecutionError(
-            "This provider does not support embeddings".to_string(),
-        ))
-    }
 
     /// Check if this provider is a LeadWorkerProvider
     /// This is used for logging model information at startup
@@ -399,7 +367,7 @@ pub trait Provider: Send + Sync {
     }
 
     /// Returns the first 3 user messages as strings for session naming
-    fn get_initial_user_messages(&self, messages: &Conversation) -> Vec<String> {
+    fn get_initial_user_messages(&self, messages: &[Message]) -> Vec<String> {
         messages
             .iter()
             .filter(|m| m.role == rmcp::model::Role::User)
@@ -410,10 +378,7 @@ pub trait Provider: Send + Sync {
 
     /// Generate a session name/description based on the conversation history
     /// Creates a prompt asking for a concise description in 4 words or less.
-    async fn generate_session_name(
-        &self,
-        messages: &Conversation,
-    ) -> Result<String, ProviderError> {
+    async fn generate_session_name(&self, messages: &[Message]) -> Result<String, ProviderError> {
         let context = self.get_initial_user_messages(messages);
         let prompt = self.create_session_name_prompt(&context);
         let message = Message::user().with_text(&prompt);
@@ -445,20 +410,10 @@ pub trait Provider: Send + Sync {
         prompt
     }
 
-    /// Configure OAuth authentication for this provider
-    ///
-    /// This method is called when a provider has configuration keys marked with oauth_flow = true.
-    /// Providers that support OAuth should override this method to implement their specific OAuth flow.
-    ///
-    /// # Returns
-    /// * `Ok(())` if OAuth configuration succeeds and credentials are saved
-    /// * `Err(ProviderError)` if OAuth fails or is not supported by this provider
-    ///
-    /// # Default Implementation
-    /// The default implementation returns an error indicating OAuth is not supported.
+    /// Configure OAuth for this provider (default implementation returns NotImplemented)
     async fn configure_oauth(&self) -> Result<(), ProviderError> {
-        Err(ProviderError::ExecutionError(
-            "OAuth configuration not supported by this provider".to_string(),
+        Err(ProviderError::NotImplemented(
+            "OAuth configuration not implemented for this provider".to_string(),
         ))
     }
 }

@@ -26,20 +26,23 @@ pub enum ProviderError {
 
     #[error("Unsupported operation: {0}")]
     NotImplemented(String),
+    
+    #[error("Parse error: {0}")]
+    ParseError(String),
+    
+    #[error("Configuration error: {0}")]
+    ConfigError(String),
 }
 
 impl From<anyhow::Error> for ProviderError {
     fn from(error: anyhow::Error) -> Self {
-        if let Some(reqwest_err) = error.downcast_ref::<reqwest::Error>() {
-            return ProviderError::RequestFailed(reqwest_err.to_string());
-        }
         ProviderError::ExecutionError(error.to_string())
     }
 }
 
 impl From<reqwest::Error> for ProviderError {
     fn from(error: reqwest::Error) -> Self {
-        ProviderError::RequestFailed(error.to_string())
+        ProviderError::ExecutionError(error.to_string())
     }
 }
 

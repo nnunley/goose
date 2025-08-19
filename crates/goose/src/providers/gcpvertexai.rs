@@ -635,3 +635,4 @@ mod tests {
         assert_eq!(metadata.config_keys.len(), 6);
     }
 }
+

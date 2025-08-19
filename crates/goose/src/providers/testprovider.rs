@@ -8,6 +8,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use super::base::{Provider, ProviderMetadata, ProviderUsage};
+use super::embedding::{EmbeddingCapabilities, EmbeddingService, EmbeddingResult};
 use super::errors::ProviderError;
 use crate::conversation::message::Message;
 use crate::model::ModelConfig;
@@ -280,5 +281,23 @@ mod tests {
             .contains("No recorded response found"));
 
         let _ = fs::remove_file(temp_file);
+    }
+}
+
+// TestProvider doesn't support embeddings
+#[async_trait::async_trait]
+impl EmbeddingService for TestProvider {
+    fn embedding_capabilities(&self) -> Option<EmbeddingCapabilities> {
+        None
+    }
+    
+    async fn create_embeddings_with_model(
+        &self,
+        _texts: Vec<String>,
+        _model: &str,
+    ) -> Result<EmbeddingResult, ProviderError> {
+        Err(ProviderError::NotImplemented(
+            "TestProvider does not support embeddings".to_string()
+        ))
     }
 }

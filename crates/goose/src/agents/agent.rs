@@ -1093,7 +1093,7 @@ impl Agent {
                                             self.provider().await?,
                                         ).await;
 
-                                    let mut tool_futures = self.handle_approved_and_denied_tools(
+                                    let mut tool_futures: Vec<(String, ToolStream)> = self.handle_approved_and_denied_tools(
                                         &permission_check_result,
                                         message_tool_response.clone(),
                                         cancel_token.clone()

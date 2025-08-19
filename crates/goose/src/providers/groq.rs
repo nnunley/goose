@@ -107,7 +107,7 @@ impl Provider for GroqProvider {
     }
 
     /// Fetch supported models from Groq; returns Err on failure, Ok(None) if no models found
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         let response = self
             .api_client
             .request("openai/v1/models")
@@ -131,3 +131,4 @@ impl Provider for GroqProvider {
         Ok(Some(model_names))
     }
 }
+
