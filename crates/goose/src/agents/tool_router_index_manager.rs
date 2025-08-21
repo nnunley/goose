@@ -92,6 +92,13 @@ impl ToolRouterIndexManager {
             tools.push(platform_tools::list_resources_tool());
         }
 
+        // Add vector search tools if vectordb-sqlite feature is enabled
+        #[cfg(feature = "vectordb-sqlite")]
+        {
+            tools.push(platform_tools::search_messages_tool());
+            tools.push(platform_tools::search_documents_tool());
+        }
+
         // Index all platform tools at once
         selector
             .index_tools(&tools, "platform")

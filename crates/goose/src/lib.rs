@@ -1,6 +1,4 @@
 // Vector database backend using HNSW + SQLite for tool selection
-#[cfg(feature = "vectordb-sqlite")]
-pub(crate) const VECTORDB_BACKEND: &str = "sqlite";
 
 pub mod agents;
 pub mod config;

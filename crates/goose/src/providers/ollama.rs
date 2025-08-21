@@ -3,7 +3,6 @@ use super::embedding::{EmbeddingCapable, EmbeddingService, EmbeddingCapabilities
 use super::errors::ProviderError;
 use super::utils::{get_model, handle_response_openai_compat};
 use crate::config::custom_providers::CustomProviderConfig;
-use crate::conversation::Conversation;
 use crate::impl_provider_default;
 use crate::conversation::message::Message;
 use crate::model::ModelConfig;

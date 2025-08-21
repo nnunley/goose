@@ -92,7 +92,21 @@ impl ToolRouteManager {
             return Ok(());
         }
 
-        let selector = create_tool_selector(provider.clone(), Some(RouterToolSelectionStrategy::Llm), None)
+        // Read tool selection strategy from configuration
+        let config = crate::config::Config::global();
+        let strategy_str = config.get_param::<String>("GOOSE_TOOL_SELECTION_STRATEGY")
+            .unwrap_or_else(|_| "llm".to_string());
+        
+        let strategy = match strategy_str.to_lowercase().as_str() {
+            "vector" => Some(RouterToolSelectionStrategy::Vector),
+            "llm" => Some(RouterToolSelectionStrategy::Llm),
+            _ => {
+                tracing::warn!("Unknown tool selection strategy '{}', defaulting to LLM", strategy_str);
+                Some(RouterToolSelectionStrategy::Llm)
+            }
+        };
+
+        let selector = create_tool_selector(provider.clone(), strategy, None)
             .await
             .map_err(|e| anyhow!("Failed to create tool selector: {}", e))?;
 

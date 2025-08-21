@@ -3,32 +3,39 @@ import { useConfig } from '../../ConfigContext';
 import { getApiUrl } from '../../../config';
 
 interface ToolSelectionStrategy {
-  key: boolean;
+  key: string;
   label: string;
   description: string;
+  enabled: boolean;
 }
 
-export const all_tool_selection_strategies: ToolSelectionStrategy[] = [
+interface Features {
+  "vectordb-sqlite": boolean;
+}
+
+export const getAvailableStrategies = (features: Features): ToolSelectionStrategy[] => [
   {
-    key: false,
-    label: 'Disabled',
-    description: 'Use the default tool selection strategy',
+    key: 'llm',
+    label: 'LLM-based',
+    description: 'Use LLM-based intelligence to select the most relevant tools based on the user query context.',
+    enabled: true,
   },
   {
-    key: true,
-    label: 'Enabled',
-    description:
-      'Use LLM-based intelligence to select the most relevant tools based on the user query context.',
+    key: 'vector',
+    label: 'Vector-based',
+    description: 'Use vector similarity search to quickly find the most relevant tools.',
+    enabled: features["vectordb-sqlite"],
   },
 ];
 
 export const ToolSelectionStrategySection = () => {
-  const [routerEnabled, setRouterEnabled] = useState(false);
+  const [currentStrategy, setCurrentStrategy] = useState<string>('llm');
+  const [availableStrategies, setAvailableStrategies] = useState<ToolSelectionStrategy[]>([]);
   const [_error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { read, upsert } = useConfig();
 
-  const handleStrategyChange = async (enableRouter: boolean) => {
+  const handleStrategyChange = async (strategy: string) => {
     if (isLoading) return; // Prevent multiple simultaneous requests
 
     setError(null); // Clear any previous errors
@@ -37,7 +44,7 @@ export const ToolSelectionStrategySection = () => {
     try {
       // First update the configuration
       try {
-        await upsert('GOOSE_ENABLE_ROUTER', enableRouter.toString(), false);
+        await upsert('GOOSE_TOOL_SELECTION_STRATEGY', strategy, false);
       } catch (error) {
         console.error('Error updating configuration:', error);
         setError(`Failed to update configuration: ${error}`);
@@ -77,7 +84,7 @@ export const ToolSelectionStrategySection = () => {
       }
 
       // If both succeeded, update the UI
-      setRouterEnabled(enableRouter);
+      setCurrentStrategy(strategy);
     } catch (error) {
       console.error('Error updating tool selection strategy:', error);
       setError(`Failed to update tool selection strategy: ${error}`);
@@ -88,32 +95,76 @@ export const ToolSelectionStrategySection = () => {
 
   const fetchCurrentStrategy = useCallback(async () => {
     try {
-      const strategy = (await read('GOOSE_ENABLE_ROUTER', false)) as string;
+      const strategy = (await read('GOOSE_TOOL_SELECTION_STRATEGY', false)) as string;
       if (strategy) {
-        setRouterEnabled(strategy === 'true');
+        setCurrentStrategy(strategy);
+      } else {
+        // Default to LLM if no strategy is set
+        setCurrentStrategy('llm');
       }
     } catch (error) {
-      console.error('Error fetching current router setting:', error);
-      setError(`Failed to fetch current router setting: ${error}`);
+      console.error('Error fetching current tool selection strategy:', error);
+      setError(`Failed to fetch current tool selection strategy: ${error}`);
     }
   }, [read]);
 
+  const fetchAvailableFeatures = useCallback(async () => {
+    try {
+      const response = await fetch(getApiUrl('/features'));
+      if (!response.ok) {
+        throw new Error('Failed to fetch features');
+      }
+      const data = await response.json();
+      const strategies = getAvailableStrategies(data.features);
+      setAvailableStrategies(strategies);
+    } catch (error) {
+      console.error('Error fetching available features:', error);
+      // Fallback to LLM only if features endpoint fails
+      setAvailableStrategies(getAvailableStrategies({ "vectordb-sqlite": false }));
+    }
+  }, []);
+
   useEffect(() => {
     fetchCurrentStrategy();
-  }, [fetchCurrentStrategy]);
+    fetchAvailableFeatures();
+  }, [fetchCurrentStrategy, fetchAvailableFeatures]);
+
+  // Only render the component if there are multiple enabled strategies
+  const enabledStrategies = availableStrategies.filter(strategy => strategy.enabled);
+  
+  if (enabledStrategies.length <= 1) {
+    return null; // Don't render anything if there's only one or no strategies available
+  }
 
   return (
     <div className="space-y-1">
-      {all_tool_selection_strategies.map((strategy) => (
-        <div className="group hover:cursor-pointer" key={strategy.key.toString()}>
+      {availableStrategies.map((strategy) => (
+        <div 
+          className={`group ${strategy.enabled ? 'hover:cursor-pointer' : 'cursor-not-allowed opacity-50'}`} 
+          key={strategy.key}
+        >
           <div
-            className={`flex items-center justify-between text-text-default py-2 px-2 ${routerEnabled === strategy.key ? 'bg-background-muted' : 'bg-background-default hover:bg-background-muted'} rounded-lg transition-all`}
-            onClick={() => handleStrategyChange(strategy.key)}
+            className={`flex items-center justify-between text-text-default py-2 px-2 ${
+              currentStrategy === strategy.key 
+                ? 'bg-background-muted' 
+                : strategy.enabled 
+                  ? 'bg-background-default hover:bg-background-muted' 
+                  : 'bg-background-default'
+            } rounded-lg transition-all`}
+            onClick={() => strategy.enabled && handleStrategyChange(strategy.key)}
           >
             <div className="flex">
               <div>
-                <h3 className="text-text-default text-xs">{strategy.label}</h3>
-                <p className="text-xs text-text-muted mt-[2px]">{strategy.description}</p>
+                <h3 className="text-text-default text-xs">
+                  {strategy.label}
+                  {!strategy.enabled && " (Unavailable)"}
+                </h3>
+                <p className="text-xs text-text-muted mt-[2px]">
+                  {strategy.enabled 
+                    ? strategy.description 
+                    : "This strategy requires additional features to be enabled."
+                  }
+                </p>
               </div>
             </div>
 
@@ -121,10 +172,10 @@ export const ToolSelectionStrategySection = () => {
               <input
                 type="radio"
                 name="tool-selection-strategy"
-                value={strategy.key.toString()}
-                checked={routerEnabled === strategy.key}
-                onChange={() => handleStrategyChange(strategy.key)}
-                disabled={isLoading}
+                value={strategy.key}
+                checked={currentStrategy === strategy.key}
+                onChange={() => strategy.enabled && handleStrategyChange(strategy.key)}
+                disabled={isLoading || !strategy.enabled}
                 className="peer sr-only"
               />
               <div

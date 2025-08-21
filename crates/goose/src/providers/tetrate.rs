@@ -189,7 +189,7 @@ impl Provider for TetrateProvider {
     }
 
     /// Fetch supported models from Tetrate Agent Router Service API (only models with tool support)
-    async fn fetch_supported_models(&self) -> Result<Option<Vec<String>>, ProviderError> {
+    async fn fetch_supported_models_async(&self) -> Result<Option<Vec<String>>, ProviderError> {
         // Use the existing api_client which already has authentication configured
         let response = match self.api_client.response_get("v1/models").await {
             Ok(response) => response,

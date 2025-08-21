@@ -180,7 +180,7 @@ mod ollama_vectordb_integration_tests {
             return Ok(());
         }
 
-        use goose::agents::sqlite_vectordb::sqlite_impl::{SqliteVectorDB, ToolRecord as LWToolRecord};
+        use goose::agents::sqlite_vectordb::{ToolVectorDB, sqlite_impl::ToolRecord as LWToolRecord};
 
         let temp_dir = tempdir()?;
         let db_path = temp_dir.path().join("test_sqlite.db");
@@ -196,7 +196,7 @@ mod ollama_vectordb_integration_tests {
                 
                 // Create SQLite vector database
                 let dimension = 768; // nomic-embed-text dimension
-                let vectordb = SqliteVectorDB::new(&db_path, dimension, 1000).await?;
+                let vectordb = ToolVectorDB::new(&db_path, dimension, 1000).await?;
                 
                 // Create test data
                 let tools = vec![

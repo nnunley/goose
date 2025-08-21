@@ -8,6 +8,8 @@ pub const PLATFORM_SEARCH_AVAILABLE_EXTENSIONS_TOOL_NAME: &str =
     "platform__search_available_extensions";
 pub const PLATFORM_MANAGE_EXTENSIONS_TOOL_NAME: &str = "platform__manage_extensions";
 pub const PLATFORM_MANAGE_SCHEDULE_TOOL_NAME: &str = "platform__manage_schedule";
+pub const PLATFORM_SEARCH_MESSAGES_TOOL_NAME: &str = "platform__search_messages";
+pub const PLATFORM_SEARCH_DOCUMENTS_TOOL_NAME: &str = "platform__search_documents";
 
 pub fn read_resource_tool() -> Tool {
     Tool::new(
@@ -151,6 +153,103 @@ pub fn manage_schedule_tool() -> Tool {
         read_only_hint: Some(false),
         destructive_hint: Some(true), // Can kill jobs
         idempotent_hint: Some(false),
+        open_world_hint: Some(false),
+    })
+}
+
+#[cfg(feature = "vectordb-sqlite")]
+pub fn search_messages_tool() -> Tool {
+    Tool::new(
+        PLATFORM_SEARCH_MESSAGES_TOOL_NAME.to_string(),
+        indoc! {r#"
+            Search through conversation messages using vector similarity.
+            
+            This tool allows you to find messages from past conversations that are semantically
+            similar to your query. It uses vector embeddings to understand the meaning and context
+            of messages, not just keyword matching.
+            
+            Use this when you need to:
+            - Find previous discussions about a topic
+            - Locate relevant context from past conversations
+            - Discover how similar problems were solved before
+            - Search for specific information mentioned in conversations
+        "#}
+        .to_string(),
+        object!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "string", 
+                    "description": "The search query - describe what you're looking for in natural language"
+                },
+                "limit": {
+                    "type": "integer", 
+                    "description": "Maximum number of similar messages to return (default: 5)",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 20
+                },
+                "session_filter": {
+                    "type": "string", 
+                    "description": "Optional session ID to limit search to a specific conversation"
+                }
+            }
+        }),
+    ).annotate(ToolAnnotations {
+        title: Some("Search conversation messages".to_string()),
+        read_only_hint: Some(true),
+        destructive_hint: Some(false),
+        idempotent_hint: Some(true),
+        open_world_hint: Some(false),
+    })
+}
+
+#[cfg(feature = "vectordb-sqlite")]
+pub fn search_documents_tool() -> Tool {
+    Tool::new(
+        PLATFORM_SEARCH_DOCUMENTS_TOOL_NAME.to_string(),
+        indoc! {r#"
+            Search through indexed documents using vector similarity.
+            
+            This tool allows you to find document content that is semantically similar to your query.
+            It searches through files that have been indexed into the document vector database,
+            including code files, documentation, configuration files, and other text-based content.
+            
+            Use this when you need to:
+            - Find relevant code examples or implementations
+            - Locate documentation about specific topics
+            - Search for configuration patterns
+            - Discover similar functionality across files
+            - Find where specific concepts are discussed
+        "#}
+        .to_string(),
+        object!({
+            "type": "object",
+            "required": ["query"],
+            "properties": {
+                "query": {
+                    "type": "string", 
+                    "description": "The search query - describe what you're looking for in natural language"
+                },
+                "limit": {
+                    "type": "integer", 
+                    "description": "Maximum number of similar document chunks to return (default: 10)",
+                    "default": 10,
+                    "minimum": 1,
+                    "maximum": 50
+                },
+                "content_type_filter": {
+                    "type": "string", 
+                    "description": "Optional filter by content type (e.g., 'rust', 'markdown', 'python', 'javascript', 'json', 'yaml')"
+                }
+            }
+        }),
+    ).annotate(ToolAnnotations {
+        title: Some("Search indexed documents".to_string()),
+        read_only_hint: Some(true),
+        destructive_hint: Some(false),
+        idempotent_hint: Some(true),
         open_world_hint: Some(false),
     })
 }

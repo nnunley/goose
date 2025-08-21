@@ -471,9 +471,8 @@ impl Provider for GithubCopilotProvider {
         models.sort();
         Ok(Some(models))
     }
-}
 
-impl GithubCopilotProvider {
+    /// Configure OAuth for this provider
     async fn configure_oauth(&self) -> Result<(), ProviderError> {
         let config = Config::global();
 

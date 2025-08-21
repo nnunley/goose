@@ -27,6 +27,13 @@ pub(crate) mod sqlite_vectordb;  // SQLite + HNSW vector database implementation
 
 // Unified vector database interface
 pub(crate) mod tool_vectordb;         // Vector database adapter trait and factory
+
+// Vector database examples for different data types
+// TODO: Create these example modules
+// #[cfg(feature = "vectordb-sqlite")]
+// pub mod message_vectordb;       // Message vector database with conversation indexing
+// #[cfg(feature = "vectordb-sqlite")]
+// pub mod document_vectordb;      // Document vector database with file indexing
 pub mod types;
 
 pub use agent::{Agent, AgentEvent};

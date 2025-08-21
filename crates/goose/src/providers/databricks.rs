@@ -17,7 +17,7 @@ use super::errors::ProviderError;
 use super::formats::databricks::{create_request, response_to_message};
 use super::formats::openai::{get_usage, response_to_streaming_message};
 use super::oauth;
-use super::utils::{emit_debug_trace, get_model, ImageFormat};
+use super::utils::{get_model, ImageFormat};
 use crate::config::ConfigError;
 use crate::impl_provider_default;
 use crate::conversation::message::Message;

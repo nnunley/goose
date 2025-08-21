@@ -12,6 +12,7 @@ use tokio_stream::StreamExt;
 use tokio_util::codec::{FramedRead, LinesCodec};
 use tokio_util::io::StreamReader;
 
+use super::api_client::{ApiClient, AuthMethod};
 use super::base::{ConfigKey, ModelInfo, Provider, ProviderMetadata, ProviderUsage, Usage};
 use super::embedding::{EmbeddingCapable, EmbeddingRequest, EmbeddingResponse, EmbeddingService, EmbeddingCapabilities, EmbeddingModel, EmbeddingResult, EmbeddingUsage};
 use super::errors::ProviderError;
@@ -26,7 +27,6 @@ use crate::conversation::message::Message;
 use crate::model::ModelConfig;
 use crate::providers::base::MessageStream;
 use crate::providers::formats::openai::response_to_streaming_message;
-use crate::providers::utils::handle_status_openai_compat;
 use rmcp::model::Tool;
 
 pub const OPEN_AI_DEFAULT_MODEL: &str = "gpt-4o";
@@ -46,6 +46,8 @@ pub const OPEN_AI_DOC_URL: &str = "https://platform.openai.com/docs/models";
 pub struct OpenAiProvider {
     #[serde(skip)]
     client: Client,
+    #[serde(skip)]
+    api_client: Option<ApiClient>,
     host: String,
     base_path: String,
     api_key: String,
@@ -82,6 +84,7 @@ impl OpenAiProvider {
 
         Ok(Self {
             client,
+            api_client: None,
             host,
             base_path,
             api_key,
@@ -111,11 +114,29 @@ impl OpenAiProvider {
         };
 
         let timeout_secs = config.timeout_seconds.unwrap_or(600);
-        let auth = AuthMethod::BearerToken(api_key);
-        let mut api_client =
-            ApiClient::with_timeout(host, auth, std::time::Duration::from_secs(timeout_secs))?;
+        
+        // Create a regular client for compatibility with existing methods
+        let mut client_builder = Client::builder().timeout(std::time::Duration::from_secs(timeout_secs));
+        
+        // Add custom headers to client if present
+        if let Some(headers) = &config.headers {
+            let mut header_map = reqwest::header::HeaderMap::new();
+            for (key, value) in headers {
+                let header_name = reqwest::header::HeaderName::from_bytes(key.as_bytes())?;
+                let header_value = reqwest::header::HeaderValue::from_str(value)?;
+                header_map.insert(header_name, header_value);
+            }
+            client_builder = client_builder.default_headers(header_map);
+        }
+        
+        let client = client_builder.build()?;
 
-        // Add custom headers if present
+        // Create ApiClient for advanced features if needed
+        let auth = AuthMethod::BearerToken(api_key.clone());
+        let mut api_client =
+            ApiClient::with_timeout(host.clone(), auth, std::time::Duration::from_secs(timeout_secs))?;
+
+        // Add custom headers to ApiClient if present
         if let Some(headers) = &config.headers {
             let mut header_map = reqwest::header::HeaderMap::new();
             for (key, value) in headers {
@@ -127,8 +148,11 @@ impl OpenAiProvider {
         }
 
         Ok(Self {
-            api_client,
+            client,
+            api_client: Some(api_client),
+            host,
             base_path,
+            api_key,
             organization: None,
             project: None,
             model,
